@@ -10,6 +10,8 @@ adapter.
 > Nintendo, Game Boy and Game Boy Printer are trademarks of their respective
 > owners. This is an independent, unofficial project.
 
+![Android Boy Camera печатает коллаж на Game Boy Printer](docs/images/android-boy-camera-printing.png)
+
 ## Русский
 
 ### Возможности
@@ -22,8 +24,14 @@ adapter.
 - Вертикальные коллажи из фотографий и текстовых блоков.
 - Интерфейс на двух языках: русском и английском.
 - Печать на реальном Game Boy Printer через Arduino по USB OTG.
-- Проверка связи и отображение состояния принтера: готовность, печать, замятие
-  бумаги, низкий заряд и ошибки обмена.
+- Экспериментальная проверка связи и отображение состояния принтера.
+
+### Известные проблемы
+
+- Нет надёжного ответа от принтера об отсутствии бумаги, разряде батарей и
+  других аппаратных ошибках.
+- Некоторые русские шрифты отображаются некорректно.
+- Статус принтера показывается корректно не во всех случаях.
 
 ### Что нужно для печати
 
@@ -89,8 +97,14 @@ Android Boy Camera разработан **Duck Wader** при помощи не�
 - Vertical collages made from photos and text blocks.
 - Interface available in two languages: Russian and English.
 - Print on a real Game Boy Printer through an Arduino connected via USB OTG.
-- Connection checks and live printer status: ready, printing, paper jam, low
-  battery and communication errors.
+- Experimental printer connection and status monitoring.
+
+### Known issues
+
+- The printer does not reliably report missing paper, low batteries or other
+  hardware errors through the current adapter setup.
+- Some Cyrillic fonts render incorrectly.
+- Printer status is not always displayed correctly.
 
 ### Hardware required for printing
 

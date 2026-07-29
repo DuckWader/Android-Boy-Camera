@@ -156,6 +156,15 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(intent.getAction()) && webView != null) {
+            webView.evaluateJavascript(
+                    "window.__androidUsbAttached && window.__androidUsbAttached()", null);
+        }
+    }
+
     @Override public void onBackPressed() {
         if (webView.canGoBack()) webView.goBack();
         else super.onBackPressed();
@@ -189,6 +198,12 @@ public class MainActivity extends Activity {
             usbPort.setParameters(9600, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
             try { usbPort.setDTR(true); } catch (Exception ignored) {}
             try { usbPort.setRTS(true); } catch (Exception ignored) {}
+            // Opening many Arduino boards resets them. Give the printer bridge
+            // enough time to finish booting and detect the physical printer.
+            try { Thread.sleep(1500); } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            try { usbPort.purgeHwBuffers(false, true); } catch (Exception ignored) {}
         } catch (Exception error) {
             disconnectUsb();
             return "Ошибка открытия USB Serial: " + error.getMessage();
@@ -210,6 +225,10 @@ public class MainActivity extends Activity {
             return openUsb();
         }
 
+        @JavascriptInterface public String restartUsb() {
+            return openUsb();
+        }
+
         @JavascriptInterface public String writeUsb(String encoded) {
             if (usbPort == null || !usbPort.isOpen()) return "Arduino не подключена";
             byte[] bytes = Base64.decode(encoded, Base64.DEFAULT);
@@ -226,7 +245,7 @@ public class MainActivity extends Activity {
             byte[] request = Base64.decode(encoded, Base64.DEFAULT);
             ByteArrayOutputStream response = new ByteArrayOutputStream(request.length);
             try {
-                try { usbPort.purgeHwBuffers(true, false); } catch (Exception ignored) {}
+                try { usbPort.purgeHwBuffers(false, true); } catch (Exception ignored) {}
                 usbPort.write(request, Math.max(5000, timeoutMs));
                 long deadline = System.currentTimeMillis() + Math.max(100, timeoutMs);
                 byte[] chunk = new byte[Math.min(1024, request.length)];

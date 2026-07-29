@@ -1,5 +1,7 @@
 export const PRINTER_WIDTH = 160;
 export const PRINTER_HEIGHT = 144;
+const useRussian = /^(ru|uk|be)(-|$)/i.test(navigator.language || "");
+const tr = (ru, en) => useRussian ? ru : en;
 
 const INIT = [0x88, 0x33, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
 const EMPTY_DATA = [0x88, 0x33, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00];
@@ -67,12 +69,9 @@ export async function sendPrintJob(transport, packets, onProgress) {
   const total = packets.reduce((n, p) => n + (p.bytes || p).length, 0);
   for (const entry of packets) {
     const bytes = entry.bytes || entry;
-    const response = transport.exchange
-      ? await transport.exchange(bytes, Math.max(1500, bytes.length * 3))
-      : (await transport.write(bytes), null);
-    if (response && response.length >= 2 && response[response.length - 2] !== 0x81) {
-      throw new Error("Game Boy Printer не ответил на пакет");
-    }
+    // Keep image transfer compatible with the original Arduino firmware.
+    // Printer status is queried separately with INQUIRY packets.
+    await transport.write(bytes);
     sent += bytes.length;
     onProgress?.(sent / total);
     await new Promise((resolve) => setTimeout(resolve, entry.wait || 40));
@@ -93,6 +92,19 @@ export function decodePrinterStatus(status) {
   };
 }
 
+function throwForPrinterError(status) {
+  let message = "";
+  if (status.paperJam) message = tr("В принтере нет бумаги или она зажевана", "The printer is out of paper or paper is jammed");
+  else if (status.lowBattery) message = tr("Низкий заряд батарей принтера", "Printer batteries are low");
+  else if (status.otherError) message = tr("Принтер сообщает об ошибке", "The printer reports an error");
+  else if (status.packetError) message = tr("Ошибка пакета Game Boy Printer", "Game Boy Printer packet error");
+  else if (status.checksumError) message = tr("Ошибка контрольной суммы", "Checksum error");
+  if (!message) return;
+  const error = new Error(message);
+  error.printerStatus = status;
+  throw error;
+}
+
 export async function pingPrinter(transport, timeout = 1200) {
   if (!transport?.port || !transport.exchange) return null;
   transport.clearInput?.();
@@ -110,6 +122,7 @@ export async function waitForPrinterIdle(transport, onStatus, timeout = 45000) {
     const status = await pingPrinter(transport, 1500);
     if (!status) throw new Error("Нет ответа от Game Boy Printer");
     onStatus?.(status);
+    throwForPrinterError(status);
     if (status.busy || status.bufferFull || status.unprocessedData) sawBusy = true;
     else if (sawBusy) return status;
     else {
@@ -117,6 +130,7 @@ export async function waitForPrinterIdle(transport, onStatus, timeout = 45000) {
       const confirmation = await pingPrinter(transport, 1500);
       if (!confirmation) throw new Error("Нет ответа от Game Boy Printer");
       onStatus?.(confirmation);
+      throwForPrinterError(confirmation);
       if (!confirmation.busy && !confirmation.bufferFull && !confirmation.unprocessedData) return confirmation;
     }
     await new Promise((resolve) => setTimeout(resolve, 500));

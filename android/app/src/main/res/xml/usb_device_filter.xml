@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- FTDI -->
+    <usb-device vendor-id="1027" product-id="24577" />
+    <usb-device vendor-id="1027" product-id="24592" />
+    <usb-device vendor-id="1027" product-id="24593" />
+    <usb-device vendor-id="1027" product-id="24596" />
+    <usb-device vendor-id="1027" product-id="24597" />
+    <!-- Silicon Labs CP210x -->
+    <usb-device vendor-id="4292" product-id="60000" />
+    <usb-device vendor-id="4292" product-id="60016" />
+    <usb-device vendor-id="4292" product-id="60017" />
+    <!-- Prolific PL2303 -->
+    <usb-device vendor-id="1659" product-id="8963" />
+    <usb-device vendor-id="1659" product-id="9123" />
+    <usb-device vendor-id="1659" product-id="9139" />
+    <usb-device vendor-id="1659" product-id="9155" />
+    <usb-device vendor-id="1659" product-id="9171" />
+    <usb-device vendor-id="1659" product-id="9187" />
+    <usb-device vendor-id="1659" product-id="9203" />
+    <!-- CH340 / CH341 / CH9102 -->
+    <usb-device vendor-id="6790" product-id="21795" />
+    <usb-device vendor-id="6790" product-id="29987" />
+    <usb-device vendor-id="6790" product-id="21972" />
+    <!-- Arduino and common CDC devices -->
+    <usb-device vendor-id="9025" />
+    <usb-device vendor-id="5824" product-id="1155" />
+    <usb-device vendor-id="1003" product-id="8260" />
+    <usb-device vendor-id="7855" product-id="4" />
+    <usb-device vendor-id="3368" product-id="516" />
+    <usb-device vendor-id="1155" product-id="22336" />
+    <usb-device vendor-id="11914" product-id="5" />
+    <usb-device vendor-id="11914" product-id="10" />
+    <usb-device vendor-id="5840" product-id="2174" />
+</resources>

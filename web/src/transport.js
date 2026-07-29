@@ -220,13 +220,24 @@ export class PrinterTransport {
   }
 
   async autoConnect() {
-    if (this.port || !navigator.serial) return null;
+    if (this.port) return null;
+    if (window.AndroidBridge) return this.connect({ auto: true });
+    if (!navigator.serial) return null;
     try {
       return await this.connect({ auto: true });
     } catch (error) {
       if (error.message === "NO_AUTHORIZED_PORT") return null;
       throw error;
     }
+  }
+
+  async recoverPrinter() {
+    if (!window.AndroidBridge || this.port !== window.AndroidBridge || !window.AndroidBridge.restartUsb) {
+      return false;
+    }
+    const result = window.AndroidBridge.restartUsb();
+    if (result !== "READY") return false;
+    return true;
   }
 
   async disconnect() {

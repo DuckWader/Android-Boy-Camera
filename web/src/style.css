@@ -89,6 +89,7 @@ input[type="range"] { accent-color: #d3dc70; }
 .file-button input { position: absolute; opacity: 0; width: 1px; }
 .print-card { margin-top: 13px; border-radius: 12px 12px 20px 20px; padding: 18px; }
 .print-card h2 { margin-top: 4px; font-family: Georgia, serif; font-size: 20px; }
+.print-card > div:first-child, #status, .collage-status { display: none; }
 .print-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 46px; gap: 9px; }
 .collage-commit { grid-column: 1 / -1; background: #d1da68; color: #171a13; }
 .print-button { width: 100%; border: 0; border-radius: 12px; background: #d1da68; color: #171a13; padding: 13px; display: flex; align-items: center; justify-content: center; font-weight: 900; }
