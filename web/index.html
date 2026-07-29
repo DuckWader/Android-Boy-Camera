@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#20251d" />
+    <meta name="description" content="Камера и печать фотографий на Nintendo Game Boy Printer через Arduino." />
+    <title>Android Boy Camera</title>
+  </head>
+  <body>
+    <div id="app">
+      <main style="max-width:520px;margin:48px auto;padding:24px;color:#ecefdd;background:#20251d;border-radius:16px;font-family:system-ui,sans-serif">
+        <h1 style="margin-top:0">Android Boy Camera</h1>
+        <p>Приложение загружается…</p>
+        <p id="local-file-help" style="display:none;line-height:1.5;color:#c9cfb4">
+          Эту страницу нельзя запускать напрямую как файл. Закройте её и дважды
+          щёлкните <strong>Открыть GB Pocket Print.cmd</strong> в папке проекта.
+        </p>
+      </main>
+    </div>
+    <script>
+      if (location.protocol === "file:") {
+        document.querySelector("#local-file-help").style.display = "block";
+      }
+    </script>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
