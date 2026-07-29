@@ -37,6 +37,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Collections;
@@ -217,6 +218,29 @@ public class MainActivity extends Activity {
                 return "OK";
             } catch (Exception error) {
                 return "Ошибка передачи USB: " + error.getMessage();
+            }
+        }
+
+        @JavascriptInterface public synchronized String exchangeUsb(String encoded, int timeoutMs) {
+            if (usbPort == null || !usbPort.isOpen()) return "ERROR:Arduino не подключена";
+            byte[] request = Base64.decode(encoded, Base64.DEFAULT);
+            ByteArrayOutputStream response = new ByteArrayOutputStream(request.length);
+            try {
+                try { usbPort.purgeHwBuffers(true, false); } catch (Exception ignored) {}
+                usbPort.write(request, Math.max(5000, timeoutMs));
+                long deadline = System.currentTimeMillis() + Math.max(100, timeoutMs);
+                byte[] chunk = new byte[Math.min(1024, request.length)];
+                while (response.size() < request.length && System.currentTimeMillis() < deadline) {
+                    int remaining = (int) Math.max(1, deadline - System.currentTimeMillis());
+                    int count = usbPort.read(chunk, remaining);
+                    if (count > 0) response.write(chunk, 0, Math.min(count, request.length - response.size()));
+                }
+                if (response.size() != request.length) {
+                    return "ERROR:Принтер не ответил вовремя";
+                }
+                return Base64.encodeToString(response.toByteArray(), Base64.NO_WRAP);
+            } catch (Exception error) {
+                return "ERROR:Ошибка обмена USB: " + error.getMessage();
             }
         }
 

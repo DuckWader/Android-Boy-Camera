@@ -1,8 +1,16 @@
 import "./style.css";
-import { PRINTER_HEIGHT, PRINTER_WIDTH, canvasTo2bpp, makePrintJob, sendPrintJob } from "./gb-printer.js";
+import {
+  PRINTER_HEIGHT,
+  PRINTER_WIDTH,
+  canvasTo2bpp,
+  makePrintJob,
+  pingPrinter,
+  sendPrintJob,
+  waitForPrinterIdle,
+} from "./gb-printer.js";
 import { PrinterTransport } from "./transport.js";
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 const useRussian = /^(ru|uk|be)(-|$)/i.test(navigator.language || "");
 const tr = (ru, en) => useRussian ? ru : en;
 document.documentElement.lang = useRussian ? "ru" : "en";
@@ -21,6 +29,9 @@ document.querySelector("#app").innerHTML = `
       <button id="cameraTab" class="active" type="button">${tr("Камера", "Camera")}</button>
       <button id="collageTab" type="button">${tr("Коллаж", "Collage")} <span id="collageCount">0</span></button>
     </nav>
+    <div id="printerState" class="printer-state disconnected" role="status">
+      <span></span><small>${tr("Принтер", "Printer")}</small><b>${tr("Нет связи", "No connection")}</b>
+    </div>
     <div id="cameraView">
     <section class="camera-card">
       <div class="viewfinder">
@@ -168,6 +179,7 @@ let collagePhotoPending = false;
 let collageEditIndex = -1;
 let pendingDeleteIndex = -1;
 let selectedDitherMode = "bayer";
+let printingActive = false;
 
 if (document.fonts) {
   [
@@ -260,9 +272,100 @@ async function makeCollageCanvas() {
   return result;
 }
 
+async function makeCollageItemCanvas(item) {
+  const result = document.createElement("canvas");
+  result.width = PRINTER_WIDTH;
+  result.height = item.height;
+  const context = result.getContext("2d");
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, result.width, result.height);
+  const image = new Image();
+  image.src = item.dataUrl;
+  await image.decode();
+  context.drawImage(image, 0, 0, PRINTER_WIDTH, item.height);
+  return result;
+}
+
 function setStatus(text, error = false) {
   $("#status").textContent = text;
   $("#status").classList.toggle("error", error);
+}
+
+function setConnectionState(state, label) {
+  const button = $("#connect");
+  button.classList.toggle("arduino", state === "arduino");
+  button.classList.toggle("printer", state === "printer");
+  button.classList.toggle("online", state !== "disconnected");
+  $("#connect b").textContent = label || (
+    state === "printer"
+      ? tr("Принтер готов", "Printer ready")
+      : state === "arduino"
+        ? "Arduino"
+        : tr("Подключить", "Connect")
+  );
+}
+
+function setPrinterDetail(state, text) {
+  const element = $("#printerState");
+  element.className = `printer-state ${state}`;
+  element.querySelector("b").textContent = text;
+}
+
+function displayPrinterStatus(status) {
+  if (!status) return setPrinterDetail("disconnected", tr("Нет связи", "No connection"));
+  if (status.paperJam) return setPrinterDetail("error", tr("Зажевана бумага", "Paper jam"));
+  if (status.lowBattery) return setPrinterDetail("warning", tr("Мало заряда", "Low battery"));
+  if (status.otherError) return setPrinterDetail("error", tr("Ошибка принтера", "Printer error"));
+  if (status.packetError) return setPrinterDetail("error", tr("Ошибка пакета", "Packet error"));
+  if (status.checksumError) return setPrinterDetail("error", tr("Ошибка контрольной суммы", "Checksum error"));
+  if (status.bufferFull) return setPrinterDetail("printing", tr("Буфер заполнен", "Buffer full"));
+  if (status.busy || status.unprocessedData) return setPrinterDetail("printing", tr("Печатает", "Printing"));
+  return setPrinterDetail("ready", tr("Готов", "Ready"));
+}
+
+function printerStatusProblem(status) {
+  if (status.lowBattery) return tr("Низкий заряд батарей принтера.", "Printer batteries are low.");
+  if (status.paperJam) return tr("В принтере зажевало бумагу.", "Printer paper jam.");
+  if (status.otherError) return tr("Принтер сообщает об ошибке.", "The printer reports an error.");
+  if (status.packetError) return tr("Ошибка пакета Game Boy Printer.", "Game Boy Printer packet error.");
+  if (status.checksumError) return tr("Ошибка контрольной суммы.", "Checksum error.");
+  if (status.busy || status.bufferFull || status.unprocessedData) return tr("Принтер занят.", "Printer is busy.");
+  return "";
+}
+
+async function updatePrinterConnection({ announce = false } = {}) {
+  if (!transport.port) {
+    setConnectionState("disconnected");
+    displayPrinterStatus(null);
+    return null;
+  }
+  try {
+    const status = await pingPrinter(transport);
+    if (!status) {
+      setConnectionState("arduino");
+      displayPrinterStatus(null);
+      if (announce) setStatus(tr("Arduino подключена, но принтер не отвечает.", "Arduino is connected, but the printer is not responding."), true);
+      return null;
+    }
+    setConnectionState("printer");
+    displayPrinterStatus(status);
+    const problem = printerStatusProblem(status);
+    if (announce) setStatus(problem || tr("Arduino и Game Boy Printer подключены.", "Arduino and Game Boy Printer are connected."), Boolean(problem));
+    return status;
+  } catch {
+    setConnectionState("arduino");
+    displayPrinterStatus(null);
+    if (announce) setStatus(tr("Arduino подключена, но принтер не отвечает.", "Arduino is connected, but the printer is not responding."), true);
+    return null;
+  }
+}
+
+async function requirePrinterReady() {
+  const status = await updatePrinterConnection({ announce: false });
+  if (!status) throw new Error(tr("Нет ответа от Game Boy Printer. Проверьте питание и кабель.", "No response from the Game Boy Printer. Check its power and cable."));
+  const problem = printerStatusProblem(status);
+  if (problem) throw new Error(problem);
+  return status;
 }
 
 function selectedFrameImage() {
@@ -752,19 +855,48 @@ $("#connect").addEventListener("click", async () => {
   try {
     if (transport.port) {
       await transport.disconnect();
-      $("#connect").classList.remove("online");
-      $("#connect b").textContent = tr("Подключить", "Connect");
+      setConnectionState("disconnected");
+      displayPrinterStatus(null);
       setStatus(tr("Arduino отключена.", "Arduino disconnected."));
       return;
     }
     const mode = await transport.connect();
-    $("#connect").classList.add("online");
-    $("#connect b").textContent = tr("Подключено", "Connected");
+    setConnectionState("arduino");
     setStatus(tr(`Arduino подключена через ${mode}, 9600 бод.`, `Arduino connected via ${mode} at 9600 baud.`));
+    await updatePrinterConnection({ announce: true });
   } catch (error) {
+    setConnectionState("disconnected");
+    displayPrinterStatus(null);
     setStatus(tr(`Не удалось подключиться: ${error.message}`, `Connection failed: ${error.message}`), true);
   }
 });
+
+async function attemptAutoConnect() {
+  if (transport.port || !navigator.serial) return;
+  try {
+    const mode = await transport.autoConnect();
+    if (!mode) return;
+    setConnectionState("arduino");
+    setStatus(tr(`Arduino подключена автоматически через ${mode}.`, `Arduino connected automatically via ${mode}.`));
+    await updatePrinterConnection({ announce: true });
+  } catch (error) {
+    setConnectionState("disconnected");
+    displayPrinterStatus(null);
+    setStatus(tr(`Автоподключение не удалось: ${error.message}`, `Automatic connection failed: ${error.message}`), true);
+  }
+}
+
+navigator.serial?.addEventListener("connect", () => setTimeout(attemptAutoConnect, 500));
+navigator.serial?.addEventListener("disconnect", async () => {
+  if (transport.port) await transport.disconnect().catch(() => {});
+  setConnectionState("disconnected");
+  displayPrinterStatus(null);
+  setStatus(tr("Кабель Arduino отключён.", "Arduino cable disconnected."), true);
+});
+setTimeout(attemptAutoConnect, 250);
+setInterval(() => {
+  if (transport.port && !printingActive) updatePrinterConnection().catch(() => {});
+}, 4000);
 
 $("#print").addEventListener("click", async () => {
   if (!hasPhoto) return;
@@ -773,20 +905,25 @@ $("#print").addEventListener("click", async () => {
     return;
   }
   try {
+    printingActive = true;
     $("#print").disabled = true;
     $("#progress").hidden = false;
+    await requirePrinterReady();
     const tileBytes = canvasTo2bpp(printCanvas);
     const packets = makePrintJob(tileBytes, { density: Number($("#density").value) });
     await sendPrintJob(transport, packets, (value) => {
       $("#progress i").style.width = `${Math.round(value * 100)}%`;
       setStatus(tr(`Передача в принтер: ${Math.round(value * 100)}%`, `Sending to printer: ${Math.round(value * 100)}%`));
     });
-    setStatus(tr("Данные отправлены. Принтер начинает печать.", "Data sent. The printer is starting."));
+    await waitForPrinterIdle(transport, displayPrinterStatus);
+    setStatus(tr("Печать завершена.", "Printing completed."));
   } catch (error) {
     setStatus(tr(`Ошибка печати: ${error.message}`, `Print error: ${error.message}`), true);
   } finally {
+    printingActive = false;
     $("#print").disabled = false;
     setTimeout(() => { $("#progress").hidden = true; }, 1200);
+    updatePrinterConnection().catch(() => {});
   }
 });
 
@@ -797,18 +934,32 @@ $("#printCollage").addEventListener("click", async () => {
     return;
   }
   try {
+    printingActive = true;
     $("#printCollage").disabled = true;
-    const longCanvas = await makeCollageCanvas();
-    const tileBytes = canvasTo2bpp(longCanvas);
-    const packets = makePrintJob(tileBytes, { density: Number($("#density").value) });
-    await sendPrintJob(transport, packets, (value) => {
-      $("#collageStatus").textContent = tr(`Печать коллажа: ${Math.round(value * 100)}%`, `Printing collage: ${Math.round(value * 100)}%`);
-    });
-    $("#collageStatus").textContent = tr("Коллаж отправлен на печать.", "Collage sent to printer.");
+    await requirePrinterReady();
+    for (let index = 0; index < collageItems.length; index++) {
+      const item = collageItems[index];
+      const next = collageItems[index + 1];
+      const itemCanvas = await makeCollageItemCanvas(item);
+      const tileBytes = canvasTo2bpp(itemCanvas);
+      const bottomFeed = index === collageItems.length - 1 ? 3 : (item.type === "photo" && next?.type === "photo" ? 2 : 0);
+      const packets = makePrintJob(tileBytes, {
+        density: Number($("#density").value),
+        margins: bottomFeed,
+      });
+      await sendPrintJob(transport, packets, (value) => {
+        const total = (index + value) / collageItems.length;
+        $("#collageStatus").textContent = tr(`Печать коллажа: ${Math.round(total * 100)}%`, `Printing collage: ${Math.round(total * 100)}%`);
+      });
+      await waitForPrinterIdle(transport, displayPrinterStatus);
+    }
+    $("#collageStatus").textContent = tr("Печать коллажа завершена.", "Collage printing completed.");
   } catch (error) {
     $("#collageStatus").textContent = tr(`Ошибка печати: ${error.message}`, `Print error: ${error.message}`);
   } finally {
+    printingActive = false;
     $("#printCollage").disabled = false;
+    updatePrinterConnection().catch(() => {});
   }
 });
 

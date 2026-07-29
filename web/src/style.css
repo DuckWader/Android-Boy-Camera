@@ -25,11 +25,21 @@ h1 { font-family: Georgia, serif; font-size: 24px; letter-spacing: -.5px; }
 .brand-button:focus-visible { outline: 2px solid #d5df68; outline-offset: 3px; }
 .connection { margin-left: auto; display: flex; align-items: center; gap: 7px; color: #d8dbc9; background: #282d22; border: 1px solid #444b3b; padding: 9px 11px; border-radius: 999px; font-size: 11px; }
 .connection span { width: 7px; height: 7px; border-radius: 50%; background: #a2695d; box-shadow: 0 0 0 3px #a2695d22; }
-.connection.online span { background: #cdda5a; box-shadow: 0 0 0 3px #cdda5a22; }
+.connection.arduino span { background: #d7b34e; box-shadow: 0 0 0 3px #d7b34e22; }
+.connection.printer span { background: #9fbd4a; box-shadow: 0 0 0 3px #9fbd4a22; }
 .mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: -7px 0 12px; padding: 4px; border: 1px solid #3d4434; border-radius: 11px; background: #151812; }
 .mode-tabs button { padding: 9px; border: 0; border-radius: 8px; color: #9da58f; background: transparent; font-size: 12px; font-weight: 800; }
 .mode-tabs button.active { color: #171a13; background: #d1da68; }
 .mode-tabs span { display: inline-grid; min-width: 18px; height: 18px; place-items: center; margin-left: 4px; border-radius: 9px; background: #0002; font-size: 10px; }
+.printer-state { display: grid; grid-template-columns: 9px auto 1fr; align-items: center; gap: 7px; margin: -4px 0 12px; padding: 8px 10px; border: 1px solid #3d4434; border-radius: 9px; color: #aeb59f; background: #151812; font-size: 11px; }
+.printer-state > span { width: 9px; height: 9px; border-radius: 50%; background: #a2695d; box-shadow: 0 0 0 3px #a2695d22; }
+.printer-state small { color: #858d78; }
+.printer-state b { justify-self: end; color: #d9ddcc; }
+.printer-state.ready > span { background: #9fbd4a; box-shadow: 0 0 0 3px #9fbd4a22; }
+.printer-state.warning > span { background: #d7b34e; box-shadow: 0 0 0 3px #d7b34e22; }
+.printer-state.printing > span { background: #d5df68; box-shadow: 0 0 0 3px #d5df6822; animation: printer-pulse 1s ease-in-out infinite alternate; }
+.printer-state.error > span { background: #d26959; box-shadow: 0 0 0 3px #d2695922; }
+@keyframes printer-pulse { to { opacity: .35; } }
 .camera-card, .print-card { border: 1px solid #42483a; background: #20251dcc; box-shadow: 0 18px 50px #0005; }
 .camera-card { padding: 10px; border-radius: 20px 20px 12px 12px; }
 .viewfinder { position: relative; overflow: hidden; width: 100%; aspect-ratio: 8 / 7; background: #0a0c09; border-radius: 13px; border: 1px solid #555d49; }

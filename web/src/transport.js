@@ -6,6 +6,7 @@ class AndroidUsbSerial {
     this.device = null;
     this.interfaceNumber = 0;
     this.endpointOut = 0;
+    this.endpointIn = 0;
   }
 
   async connect() {
@@ -24,6 +25,8 @@ class AndroidUsbSerial {
     this.interfaceNumber = iface.interfaceNumber;
     const alt = iface.alternates.find((item) => item.endpoints.length) || iface.alternates[0];
     this.endpointOut = alt.endpoints.find((ep) => ep.direction === "out" && ep.type === "bulk")?.endpointNumber;
+    this.endpointIn = alt.endpoints.find((ep) => ep.direction === "in" && ep.type === "bulk")?.endpointNumber;
+    if (!this.endpointIn) throw new Error(tr("У USB-адаптера не найден канал ответа", "No input channel was found on the USB adapter"));
     await this.device.claimInterface(this.interfaceNumber);
     if (alt.alternateSetting) await this.device.selectAlternateInterface(this.interfaceNumber, alt.alternateSetting);
     if (this.device.vendorId === 0x1a86) await this.initCh340();
@@ -59,6 +62,22 @@ class AndroidUsbSerial {
     if (result.status !== "ok") throw new Error(`USB: ${result.status}`);
   }
 
+  async exchange(bytes, timeout = 1500) {
+    await this.write(bytes);
+    const output = new Uint8Array(bytes.length);
+    let offset = 0;
+    const deadline = Date.now() + timeout;
+    while (offset < output.length && Date.now() < deadline) {
+      const result = await this.device.transferIn(this.endpointIn, output.length - offset);
+      if (result.status !== "ok") throw new Error(`USB: ${result.status}`);
+      const chunk = new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength);
+      output.set(chunk.slice(0, output.length - offset), offset);
+      offset += chunk.length;
+    }
+    if (offset < output.length) throw new Error(tr("Принтер не ответил вовремя", "Printer response timed out"));
+    return output;
+  }
+
   async disconnect() {
     if (!this.device) return;
     await this.device.releaseInterface(this.interfaceNumber).catch(() => {});
@@ -71,14 +90,18 @@ export class PrinterTransport {
   constructor() {
     this.port = null;
     this.writer = null;
+    this.reader = null;
     this.mode = null;
+    this.rxQueue = [];
+    this.rxWaiters = [];
+    this.readLoopActive = false;
   }
 
   get supported() {
     return Boolean(window.AndroidBridge || navigator.serial || navigator.usb);
   }
 
-  async connect() {
+  async connect({ auto = false } = {}) {
     if (this.port) return this.mode;
     if (window.AndroidBridge) {
       let result = window.AndroidBridge.connectUsb();
@@ -97,9 +120,18 @@ export class PrinterTransport {
       this.port = window.AndroidBridge;
     } else if (navigator.serial) {
       this.mode = "Web Serial";
-      this.port = await navigator.serial.requestPort();
+      if (auto) {
+        const ports = await navigator.serial.getPorts();
+        if (!ports.length) throw new Error("NO_AUTHORIZED_PORT");
+        this.port = ports[0];
+      } else {
+        this.port = await navigator.serial.requestPort();
+      }
       await this.port.open({ baudRate: 9600, dataBits: 8, stopBits: 1, parity: "none", flowControl: "none" });
       this.writer = this.port.writable.getWriter();
+      this.reader = this.port.readable.getReader();
+      this.readLoopActive = true;
+      this.readLoop();
     } else if (navigator.usb) {
       this.mode = "WebUSB";
       this.port = new AndroidUsbSerial();
@@ -120,12 +152,93 @@ export class PrinterTransport {
     else await this.port.write(bytes);
   }
 
+  async readLoop() {
+    try {
+      while (this.readLoopActive && this.reader) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        if (value) {
+          this.rxQueue.push(...value);
+          this.rxWaiters.splice(0).forEach((resolve) => resolve());
+        }
+      }
+    } catch {
+      // Disconnects and released ports terminate the background reader.
+    } finally {
+      this.readLoopActive = false;
+      this.rxWaiters.splice(0).forEach((resolve) => resolve());
+    }
+  }
+
+  clearInput() {
+    this.rxQueue.length = 0;
+  }
+
+  async readExact(length, timeout = 1500) {
+    const deadline = Date.now() + timeout;
+    while (this.rxQueue.length < length) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(tr("Принтер не ответил вовремя", "Printer response timed out"));
+      await new Promise((resolve) => {
+        let settled = false;
+        const waiter = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          const index = this.rxWaiters.indexOf(waiter);
+          if (index >= 0) this.rxWaiters.splice(index, 1);
+          resolve();
+        }, remaining);
+        this.rxWaiters.push(waiter);
+      });
+    }
+    return new Uint8Array(this.rxQueue.splice(0, length));
+  }
+
+  async exchange(bytes, timeout = 1500) {
+    if (window.AndroidBridge && this.port === window.AndroidBridge) {
+      if (!window.AndroidBridge.exchangeUsb) {
+        throw new Error(tr("Эта версия Android-приложения не умеет читать ответ принтера", "This Android app version cannot read printer responses"));
+      }
+      const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+      const result = window.AndroidBridge.exchangeUsb(btoa(binary), timeout);
+      if (result.startsWith("ERROR:")) throw new Error(result.slice(6));
+      const decoded = atob(result);
+      return Uint8Array.from(decoded, (char) => char.charCodeAt(0));
+    }
+    if (this.writer) {
+      await this.writer.write(bytes);
+      return this.readExact(bytes.length, timeout);
+    }
+    if (this.port instanceof AndroidUsbSerial) return this.port.exchange(bytes, timeout);
+    throw new Error(tr("Чтение ответа пока недоступно для этого подключения", "Response reading is unavailable for this connection"));
+  }
+
+  async autoConnect() {
+    if (this.port || !navigator.serial) return null;
+    try {
+      return await this.connect({ auto: true });
+    } catch (error) {
+      if (error.message === "NO_AUTHORIZED_PORT") return null;
+      throw error;
+    }
+  }
+
   async disconnect() {
     if (!this.port) return;
     try {
       if (window.AndroidBridge && this.port === window.AndroidBridge) {
         window.AndroidBridge.disconnectUsb();
       } else if (this.writer) {
+        this.readLoopActive = false;
+        await this.reader?.cancel().catch(() => {});
+        this.reader?.releaseLock();
+        this.reader = null;
         this.writer.releaseLock();
         await this.port.close();
       } else {
@@ -133,8 +246,10 @@ export class PrinterTransport {
       }
     } finally {
       this.writer = null;
+      this.reader = null;
       this.port = null;
       this.mode = null;
+      this.rxQueue.length = 0;
     }
   }
 }

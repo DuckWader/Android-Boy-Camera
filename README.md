@@ -22,6 +22,8 @@ adapter.
 - Вертикальные коллажи из фотографий и текстовых блоков.
 - Интерфейс на двух языках: русском и английском.
 - Печать на реальном Game Boy Printer через Arduino по USB OTG.
+- Проверка связи и отображение состояния принтера: готовность, печать, замятие
+  бумаги, низкий заряд и ошибки обмена.
 
 ### Что нужно для печати
 
@@ -87,6 +89,8 @@ Android Boy Camera разработан **Duck Wader** при помощи не�
 - Vertical collages made from photos and text blocks.
 - Interface available in two languages: Russian and English.
 - Print on a real Game Boy Printer through an Arduino connected via USB OTG.
+- Connection checks and live printer status: ready, printing, paper jam, low
+  battery and communication errors.
 
 ### Hardware required for printing
 

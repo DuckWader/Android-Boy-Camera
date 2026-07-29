@@ -3,6 +3,7 @@ export const PRINTER_HEIGHT = 144;
 
 const INIT = [0x88, 0x33, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
 const EMPTY_DATA = [0x88, 0x33, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00];
+const INQUIRY = [0x88, 0x33, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00];
 
 function checksum(command, compression, payload) {
   let sum = command + compression + (payload.length & 0xff) + (payload.length >> 8);
@@ -10,7 +11,7 @@ function checksum(command, compression, payload) {
   return [sum & 0xff, (sum >> 8) & 0xff];
 }
 
-function packet(command, payload = [], compression = 0) {
+export function packet(command, payload = [], compression = 0) {
   return new Uint8Array([
     0x88, 0x33, command, compression,
     payload.length & 0xff, (payload.length >> 8) & 0xff,
@@ -66,9 +67,59 @@ export async function sendPrintJob(transport, packets, onProgress) {
   const total = packets.reduce((n, p) => n + (p.bytes || p).length, 0);
   for (const entry of packets) {
     const bytes = entry.bytes || entry;
-    await transport.write(bytes);
+    const response = transport.exchange
+      ? await transport.exchange(bytes, Math.max(1500, bytes.length * 3))
+      : (await transport.write(bytes), null);
+    if (response && response.length >= 2 && response[response.length - 2] !== 0x81) {
+      throw new Error("Game Boy Printer не ответил на пакет");
+    }
     sent += bytes.length;
     onProgress?.(sent / total);
     await new Promise((resolve) => setTimeout(resolve, entry.wait || 40));
   }
+}
+
+export function decodePrinterStatus(status) {
+  return {
+    raw: status,
+    lowBattery: Boolean(status & 0x80),
+    otherError: Boolean(status & 0x40),
+    paperJam: Boolean(status & 0x20),
+    packetError: Boolean(status & 0x10),
+    unprocessedData: Boolean(status & 0x08),
+    bufferFull: Boolean(status & 0x04),
+    busy: Boolean(status & 0x02),
+    checksumError: Boolean(status & 0x01),
+  };
+}
+
+export async function pingPrinter(transport, timeout = 1200) {
+  if (!transport?.port || !transport.exchange) return null;
+  transport.clearInput?.();
+  const response = await transport.exchange(new Uint8Array(INQUIRY), timeout);
+  if (response.length < INQUIRY.length) return null;
+  const deviceId = response[response.length - 2];
+  if (deviceId !== 0x81) return null;
+  return decodePrinterStatus(response[response.length - 1]);
+}
+
+export async function waitForPrinterIdle(transport, onStatus, timeout = 45000) {
+  const deadline = Date.now() + timeout;
+  let sawBusy = false;
+  while (Date.now() < deadline) {
+    const status = await pingPrinter(transport, 1500);
+    if (!status) throw new Error("Нет ответа от Game Boy Printer");
+    onStatus?.(status);
+    if (status.busy || status.bufferFull || status.unprocessedData) sawBusy = true;
+    else if (sawBusy) return status;
+    else {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const confirmation = await pingPrinter(transport, 1500);
+      if (!confirmation) throw new Error("Нет ответа от Game Boy Printer");
+      onStatus?.(confirmation);
+      if (!confirmation.busy && !confirmation.bufferFull && !confirmation.unprocessedData) return confirmation;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error("Принтер не завершил печать за отведённое время");
 }
