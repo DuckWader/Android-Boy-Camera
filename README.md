@@ -14,29 +14,14 @@ adapter.
 
 ### Возможности
 
-- Камера телефона с обработкой изображения в реальном времени.
-- Основная и зеркально отображаемая фронтальная камера.
-- Фиксация кадра повторным нажатием кнопки затвора.
-- Импорт фотографий из галереи, выбор области кадрирования и цифровой зум.
-- Настройка яркости и контраста.
-- Четыре способа преобразования в четыре оттенка:
-  - без дизеринга;
-  - Bayer 4×4;
-  - Floyd–Steinberg;
-  - Atkinson.
+- Делай фото в стиле камеры Game Boy или обрабатывай уже готовые изображения.
+- Четыре способа преобразования в четыре оттенка серого.
 - 21 рамка в стиле Game Boy Camera.
-- Цветовые фильтры для сохранения и отправки изображений. Они не изменяют
-  монохромные данные, передаваемые принтеру.
-- Сохранение PNG в галерею Android и отправка изображения через системное меню
-  «Поделиться».
-- Вертикальные коллажи из 1–4 фотографий и текстовых блоков.
-- Изменение порядка и удаление элементов коллажа отдельными кнопками.
-- Текстовый редактор с предпросмотром, выбором размера и шестью шрифтами,
-  поддерживающими кириллицу.
-- Русский интерфейс для русской, украинской и белорусской системной локали;
-  английский интерфейс для остальных языков.
-- Подключение Arduino по USB OTG и передача данных для печати на настоящем
-  Game Boy Printer.
+- Разные цветовые фильтры.
+- Сохранение PNG в галерею Android и отправка изображения в один клик.
+- Вертикальные коллажи из фотографий и текстовых блоков.
+- Интерфейс на двух языках: русском и английском.
+- Печать на реальном Game Boy Printer через Arduino по USB OTG.
 
 ### Что нужно для печати
 
@@ -94,27 +79,14 @@ Android Boy Camera разработан **Duck Wader** при помощи не�
 
 ### Features
 
-- Real-time phone camera processing.
-- Rear camera and mirrored front camera.
-- Tap the shutter again to release a frozen frame.
-- Gallery import, crop positioning and digital zoom.
-- Brightness and contrast controls.
-- Four four-shade conversion modes:
-  - no dithering;
-  - Bayer 4×4;
-  - Floyd–Steinberg;
-  - Atkinson.
+- Take photos in the style of the Game Boy Camera or process existing images.
+- Four methods for converting images into four shades of gray.
 - 21 Game Boy Camera-style frames.
-- Color filters for saving and sharing. They do not change the monochrome data
-  sent to the printer.
-- Save PNG images to the Android gallery or share them through Android's system
-  share sheet.
-- Vertical collages containing 1–4 photos and text blocks.
-- Dedicated buttons for reordering and deleting collage items.
-- Live text preview, adjustable text size and six Cyrillic-capable fonts.
-- Russian UI for Russian, Ukrainian and Belarusian system locales; English UI
-  for all other locales.
-- USB OTG connection to an Arduino and printing on a real Game Boy Printer.
+- Various color filters.
+- Save PNG images to the Android gallery and share them in one tap.
+- Vertical collages made from photos and text blocks.
+- Interface available in two languages: Russian and English.
+- Print on a real Game Boy Printer through an Arduino connected via USB OTG.
 
 ### Hardware required for printing
 
