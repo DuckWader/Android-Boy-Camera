@@ -10,7 +10,10 @@ import {
 } from "./gb-printer.js";
 import { PrinterTransport } from "./transport.js";
 
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.3.3";
+// Diagnostic print logging is retained for future troubleshooting.
+// Set this flag to true to restore the on-screen protocol log.
+const PRINT_LOG_ENABLED = false;
 const useRussian = /^(ru|uk|be)(-|$)/i.test(navigator.language || "");
 const tr = (ru, en) => useRussian ? ru : en;
 document.documentElement.lang = useRussian ? "ru" : "en";
@@ -22,16 +25,13 @@ document.querySelector("#app").innerHTML = `
     <header>
       <button id="aboutOpen" class="brand-button" type="button" aria-label="${tr("О приложении", "About")}"><img class="brand-logo" src="./pixel-duck.png" alt="Pixel Duck"></button>
       <div><p class="eyebrow">ANDROID BOY</p><h1>Camera</h1></div>
-      <button id="connect" class="connection"><span></span><b>${tr("Подключить", "Connect")}</b></button>
+      <button id="connect" class="connection"><span></span><b>${tr("Статус", "Status")}</b></button>
     </header>
 
     <nav class="mode-tabs">
       <button id="cameraTab" class="active" type="button">${tr("Камера", "Camera")}</button>
       <button id="collageTab" type="button">${tr("Коллаж", "Collage")} <span id="collageCount">0</span></button>
     </nav>
-    <div id="printerState" class="printer-state disconnected" role="status">
-      <span></span><small>${tr("Принтер", "Printer")}</small><b>${tr("Нет связи", "No connection")}</b>
-    </div>
     <div id="cameraView">
     <section class="camera-card">
       <div class="viewfinder">
@@ -101,7 +101,11 @@ document.querySelector("#app").innerHTML = `
         <button id="addCollagePhoto" type="button">${tr("Фото", "Photo")}</button>
         <button id="addCollageText" type="button">${tr("Текст", "Text")}</button>
       </div>
-      <button id="printCollage" class="print-button collage-print" disabled>${tr("Распечатать коллаж", "Print collage")}</button>
+      <div class="collage-actions">
+        <button id="printCollage" class="print-button collage-print" disabled>${tr("Распечатать", "Print")}</button>
+        <button id="saveCollage" class="save-button" disabled>${tr("Скачать", "Download")}</button>
+        <button id="shareCollage" class="share-button" type="button" disabled aria-label="${tr("Поделиться", "Share")}" title="${tr("Поделиться", "Share")}"><span class="share-icon" aria-hidden="true"><i></i><i></i><i></i><b></b><b></b></span></button>
+      </div>
       <p id="collageStatus" class="collage-status">${tr("Добавьте фотографию или текст.", "Add a photo or text.")}</p>
     </section>
 
@@ -142,10 +146,30 @@ document.querySelector("#app").innerHTML = `
         <div><button id="aboutClose" type="button">${tr("Закрыть", "Close")}</button></div>
       </div>
     </div>
+    <div id="statusDialog" class="editor-overlay" hidden>
+      <div class="editor-card status-card">
+        <h2>${tr("Состояние подключения", "Connection status")}</h2>
+        <p><span>Arduino</span><b id="statusArduinoValue">${tr("Не подключена", "Not connected")}</b></p>
+        <p><span>Game Boy Printer</span><b id="statusPrinterValue">${tr("Нет связи", "No connection")}</b></p>
+        <div><button id="statusRefresh" type="button">${tr("Обновить", "Refresh")}</button><button id="statusClose" type="button">${tr("Закрыть", "Close")}</button></div>
+      </div>
+    </div>
     <footer>Pixel Duck Production special for <a href="https://t.me/retro_museum" target="_blank" rel="noopener noreferrer">Retro Museum</a></footer>
   </main>`;
 
 const $ = (selector) => document.querySelector(selector);
+$("#statusRefresh").insertAdjacentHTML(
+  "beforebegin",
+  `<button id="statusTest" type="button">${tr("Тест", "Test")}</button>`,
+);
+if (PRINT_LOG_ENABLED) {
+  $("main").insertAdjacentHTML("beforeend", `
+    <section class="print-log-panel">
+      <div><b>${tr("Лог печати", "Print log")}</b><button id="clearPrintLog" type="button">${tr("Очистить", "Clear")}</button></div>
+      <pre id="printLog">${tr("Журнал готов.", "Log ready.")}</pre>
+    </section>
+  `);
+}
 const video = $("#video");
 const canvas = $("#preview");
 const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -156,6 +180,9 @@ const printCtx = printCanvas.getContext("2d", { willReadFrequently: true });
 const transport = new PrinterTransport();
 let stream = null;
 let frameHandle = null;
+let cameraStarting = false;
+let resumeLiveCamera = false;
+let cameraResumeTimer = null;
 let hasPhoto = false;
 let sourceImage = null;
 let sourceMode = "camera";
@@ -182,6 +209,7 @@ let selectedDitherMode = "bayer";
 let printingActive = false;
 let printerRecoveryActive = false;
 let lastPrinterRecovery = 0;
+let collagePrintComplete = false;
 
 if (document.fonts) {
   [
@@ -239,7 +267,7 @@ function renderCollage() {
     row.className = "collage-row";
     row.innerHTML = `
       <button class="collage-item" type="button" data-action="edit" data-index="${index}" aria-label="${tr("Редактировать объект", "Edit item")}">
-        <img src="${item.dataUrl}" alt="${item.type === "text" ? tr("Текст", "Text") : tr("Фотография", "Photo")}"><span>${index + 1}</span>
+        <img src="${item.dataUrl}" alt="${item.type === "text" ? tr("Текст", "Text") : tr("Фотография", "Photo")}"><i class="collage-progress-overlay"></i><span>${index + 1}</span>
       </button>
       <div class="collage-controls">
         <button type="button" data-action="up" data-index="${index}" aria-label="${tr("Переместить выше", "Move up")}" ${index === 0 ? "disabled" : ""}>↑</button>
@@ -251,9 +279,23 @@ function renderCollage() {
   $("#collageCount").textContent = collageItems.length;
   $("#collageSlot").hidden = collageItems.length >= 4;
   $("#printCollage").disabled = collageItems.length === 0;
+  $("#saveCollage").disabled = collageItems.length === 0;
+  $("#shareCollage").disabled = collageItems.length === 0;
   $("#collageStatus").textContent = collageItems.length
     ? tr(`Объектов: ${collageItems.length}. Нажмите на объект для редактирования.`, `Items: ${collageItems.length}. Tap an item to edit it.`)
     : tr("Добавьте фотографию или текст.", "Add a photo or text.");
+}
+
+function resetCollageProgress() {
+  document.querySelectorAll(".collage-progress-overlay").forEach((overlay) => {
+    overlay.style.height = "0%";
+  });
+  collagePrintComplete = false;
+}
+
+function setCollageItemProgress(index, phase) {
+  const overlay = document.querySelector(`.collage-item[data-index="${index}"] .collage-progress-overlay`);
+  if (overlay) overlay.style.height = `${Math.max(0, Math.min(1, phase)) * 100}%`;
 }
 
 async function makeCollageCanvas() {
@@ -288,29 +330,50 @@ async function makeCollageItemCanvas(item) {
   return result;
 }
 
+function canvasPngBlob(sourceCanvas) {
+  return new Promise((resolve, reject) => {
+    sourceCanvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error(tr("Не удалось создать PNG.", "Could not create PNG.")));
+    }, "image/png");
+  });
+}
+
 function setStatus(text, error = false) {
   $("#status").textContent = text;
   $("#status").classList.toggle("error", error);
 }
+
+function appendPrintLog(type, command, detail) {
+  if (!PRINT_LOG_ENABLED) return;
+  const log = $("#printLog");
+  const time = new Date().toLocaleTimeString();
+  let text = detail;
+  if (type === "send") text = tr(`Отправил команду ${command} (${detail})`, `Sent command ${command} (${detail})`);
+  if (type === "response") text = tr(`Ответ ${command}: ${detail}`, `${command} response: ${detail}`);
+  log.textContent += `\n[${time}] ${text}`;
+  log.scrollTop = log.scrollHeight;
+}
+globalThis.__printerLog = PRINT_LOG_ENABLED ? appendPrintLog : null;
 
 function setConnectionState(state, label) {
   const button = $("#connect");
   button.classList.toggle("arduino", state === "arduino");
   button.classList.toggle("printer", state === "printer");
   button.classList.toggle("online", state !== "disconnected");
-  $("#connect b").textContent = label || (
-    state === "printer"
-      ? tr("Принтер готов", "Printer ready")
-      : state === "arduino"
-        ? "Arduino"
-        : tr("Подключить", "Connect")
-  );
+  $("#connect b").textContent = label || tr("Статус", "Status");
 }
 
 function setPrinterDetail(state, text) {
-  const element = $("#printerState");
-  element.className = `printer-state ${state}`;
-  element.querySelector("b").textContent = text;
+  const element = $("#statusPrinterValue");
+  element.className = state;
+  element.textContent = text;
+}
+
+function setArduinoDetail(connected) {
+  const element = $("#statusArduinoValue");
+  element.className = connected ? "ready" : "error";
+  element.textContent = connected ? tr("Подключена", "Connected") : tr("Не подключена", "Not connected");
 }
 
 function displayPrinterStatus(status) {
@@ -336,12 +399,17 @@ function printerStatusProblem(status) {
 }
 
 async function updatePrinterConnection({ announce = false } = {}) {
+  if (transport.port && !await transport.isConnected()) {
+    await transport.disconnect().catch(() => {});
+  }
   if (!transport.port) {
     setConnectionState("disconnected");
+    setArduinoDetail(false);
     displayPrinterStatus(null);
     return null;
   }
   try {
+    setArduinoDetail(true);
     const status = await pingPrinter(transport);
     if (!status) {
       setConnectionState("arduino");
@@ -356,6 +424,7 @@ async function updatePrinterConnection({ announce = false } = {}) {
     return status;
   } catch {
     setConnectionState("arduino");
+    setArduinoDetail(true);
     displayPrinterStatus(null);
     if (announce) setStatus(tr("Arduino подключена, но принтер не отвечает.", "Arduino is connected, but the printer is not responding."), true);
     return null;
@@ -517,12 +586,39 @@ function liveLoop() {
   frameHandle = requestAnimationFrame(liveLoop);
 }
 
-async function startCamera() {
+function stopCameraStream() {
+  cancelAnimationFrame(frameHandle);
+  frameHandle = null;
+  stream?.getTracks().forEach((track) => track.stop());
+  stream = null;
+  video.srcObject = null;
+}
+
+function setShutterMode(cancel) {
+  $("#shutter").classList.toggle("cancel", cancel);
+  $("#shutter").setAttribute("aria-label", cancel
+    ? tr("Убрать изображение и включить камеру", "Remove image and resume camera")
+    : tr("Сделать снимок", "Take a photo"));
+}
+
+async function startCameraOnce() {
   try {
     stream?.getTracks().forEach((track) => track.stop());
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: facingMode }, width: { ideal: 1280 }, height: { ideal: 1280 } },
       audio: false,
+    });
+    const activeStream = stream;
+    const track = activeStream.getVideoTracks()[0];
+    track?.addEventListener("ended", () => {
+      if (stream === activeStream && !document.hidden && sourceMode === "camera" && !hasPhoto) {
+        scheduleCameraResume();
+      }
+    });
+    track?.addEventListener("mute", () => {
+      if (stream === activeStream && !document.hidden && sourceMode === "camera" && !hasPhoto) {
+        scheduleCameraResume(700);
+      }
     });
     video.srcObject = stream;
     await video.play();
@@ -532,6 +628,7 @@ async function startCamera() {
     sourceMode = "camera";
     sourceImage = null;
     hasPhoto = false;
+    setShutterMode(false);
     $("#zoom").disabled = false;
     $("#resetZoom").disabled = false;
     $("#cropHint").hidden = true;
@@ -543,6 +640,60 @@ async function startCamera() {
   }
 }
 
+async function startCamera() {
+  if (cameraStarting) return;
+  cameraStarting = true;
+  try {
+    await startCameraOnce();
+  } finally {
+    cameraStarting = false;
+  }
+}
+
+function scheduleCameraResume(delay = 250) {
+  if (document.hidden || sourceMode !== "camera" || hasPhoto) return;
+  clearTimeout(cameraResumeTimer);
+  cameraResumeTimer = setTimeout(async () => {
+    if (document.hidden || sourceMode !== "camera" || hasPhoto) return;
+    const track = stream?.getVideoTracks?.()[0];
+    const healthy = track?.readyState === "live" && !track.muted && video.readyState >= 2;
+    if (healthy) {
+      await video.play().catch(() => {});
+      cancelAnimationFrame(frameHandle);
+      liveLoop();
+      resumeLiveCamera = false;
+      return;
+    }
+    stopCameraStream();
+    await startCamera();
+    resumeLiveCamera = false;
+  }, delay);
+}
+
+function pauseLiveCameraForBackground() {
+  if (sourceMode !== "camera" || hasPhoto) return;
+  resumeLiveCamera = true;
+  clearTimeout(cameraResumeTimer);
+  stopCameraStream();
+}
+
+function restoreLiveCameraAfterBackground() {
+  if (sourceMode !== "camera" || hasPhoto) return;
+  const track = stream?.getVideoTracks?.()[0];
+  if (resumeLiveCamera || !track || track.readyState !== "live" || track.muted || video.paused) {
+    scheduleCameraResume();
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) pauseLiveCameraForBackground();
+  else restoreLiveCameraAfterBackground();
+});
+window.addEventListener("pagehide", pauseLiveCameraForBackground);
+window.addEventListener("pageshow", restoreLiveCameraAfterBackground);
+window.__androidAppPaused = pauseLiveCameraForBackground;
+window.__androidAppResumed = restoreLiveCameraAfterBackground;
+
 $("#switchCamera").addEventListener("click", async () => {
   facingMode = facingMode === "environment" ? "user" : "environment";
   $("#switchCamera").disabled = true;
@@ -551,9 +702,8 @@ $("#switchCamera").addEventListener("click", async () => {
   await startCamera();
 });
 
-$("#shutter").addEventListener("click", () => {
-  if (hasPhoto && sourceMode === "capture") {
-    sourceMode = "camera";
+$("#shutter").addEventListener("click", async () => {
+  if (hasPhoto) {
     sourceImage = null;
     hasPhoto = false;
     $("#print").disabled = true;
@@ -561,8 +711,10 @@ $("#shutter").addEventListener("click", () => {
     $("#share").disabled = true;
     $("#addToCollage").disabled = true;
     $("#photoTitle").textContent = tr("Сначала сделайте снимок", "Take a photo first");
-    cancelAnimationFrame(frameHandle);
-    liveLoop();
+    $("#file").value = "";
+    $(".viewfinder").classList.remove("cropping");
+    setShutterMode(false);
+    await startCamera();
     setStatus(tr("Камера снова работает. Нажмите круглую кнопку, чтобы зафиксировать кадр.", "Camera resumed. Tap the round button to freeze the frame."));
     return;
   }
@@ -572,12 +724,15 @@ $("#shutter").addEventListener("click", () => {
   frozenFrame.getContext("2d").drawImage(video, 0, 0);
   sourceMode = "capture";
   sourceImage = frozenFrame;
+  stopCameraStream();
+  $("#switchCamera").disabled = true;
   $("#zoom").disabled = false;
   $("#resetZoom").disabled = false;
   $("#cropHint").hidden = true;
   $(".viewfinder").classList.remove("cropping");
   render(sourceImage);
   hasPhoto = true;
+  setShutterMode(true);
   $("#print").disabled = false;
   $("#save").disabled = false;
   $("#share").disabled = false;
@@ -591,6 +746,9 @@ $("#file").addEventListener("change", (event) => {
   if (!file) return;
   const image = new Image();
   image.onload = () => {
+    stopCameraStream();
+    $("#shutter").disabled = false;
+    $("#switchCamera").disabled = true;
     sourceMode = "gallery";
     sourceImage = image;
     cropCenterX = .5;
@@ -599,6 +757,7 @@ $("#file").addEventListener("change", (event) => {
     $("#zoomValue").value = 100;
     render(image);
     hasPhoto = true;
+    setShutterMode(true);
     $("#print").disabled = false;
     $("#save").disabled = false;
     $("#share").disabled = false;
@@ -872,24 +1031,70 @@ $("#confirmDelete").addEventListener("click", () => {
 
 $("#aboutOpen").addEventListener("click", () => { $("#aboutDialog").hidden = false; });
 $("#aboutClose").addEventListener("click", () => { $("#aboutDialog").hidden = true; });
+$("#statusClose").addEventListener("click", () => { $("#statusDialog").hidden = true; });
 
-$("#connect").addEventListener("click", async () => {
+document.addEventListener("click", () => {
+  if (collagePrintComplete && !printingActive) resetCollageProgress();
+});
+
+async function refreshStatusDialog() {
+  setArduinoDetail(Boolean(transport.port));
+  setPrinterDetail("disconnected", tr("Проверка…", "Checking…"));
+  $("#statusRefresh").disabled = true;
   try {
-    if (transport.port) {
-      await transport.disconnect();
-      setConnectionState("disconnected");
-      displayPrinterStatus(null);
-      setStatus(tr("Arduino отключена.", "Arduino disconnected."));
-      return;
+    if (!transport.port) {
+      await transport.connect();
+      setConnectionState("arduino");
+      setArduinoDetail(true);
     }
-    const mode = await transport.connect();
-    setConnectionState("arduino");
-    setStatus(tr(`Arduino подключена через ${mode}, 9600 бод.`, `Arduino connected via ${mode} at 9600 baud.`));
-    await updatePrinterConnection({ announce: true });
+    await updatePrinterConnection();
   } catch (error) {
     setConnectionState("disconnected");
+    setArduinoDetail(false);
     displayPrinterStatus(null);
-    setStatus(tr(`Не удалось подключиться: ${error.message}`, `Connection failed: ${error.message}`), true);
+    setPrinterDetail("error", tr("Проверка не удалась", "Check failed"));
+  } finally {
+    $("#statusRefresh").disabled = false;
+  }
+}
+
+$("#connect").addEventListener("click", async () => {
+  $("#statusDialog").hidden = false;
+  await refreshStatusDialog();
+});
+
+$("#statusRefresh").addEventListener("click", refreshStatusDialog);
+$("#clearPrintLog")?.addEventListener("click", () => {
+  $("#printLog").textContent = tr("Журнал очищен.", "Log cleared.");
+});
+
+$("#statusTest").addEventListener("click", async () => {
+  const button = $("#statusTest");
+  button.disabled = true;
+  try {
+    await requirePrinterReady();
+    const testCanvas = document.createElement("canvas");
+    testCanvas.width = PRINTER_WIDTH;
+    testCanvas.height = 16;
+    const testContext = testCanvas.getContext("2d");
+    testContext.fillStyle = "#fff";
+    testContext.fillRect(0, 0, testCanvas.width, testCanvas.height);
+    testContext.fillStyle = "#000";
+    testContext.font = "bold 14px sans-serif";
+    testContext.textAlign = "center";
+    testContext.textBaseline = "middle";
+    testContext.fillText("Hello world", testCanvas.width / 2, testCanvas.height / 2);
+    const packets = makePrintJob(canvasTo2bpp(testCanvas), {
+      density: Number($("#density").value),
+      margins: 3,
+    });
+    await sendPrintJob(transport, packets, null, appendPrintLog);
+    await waitForPrinterIdle(transport, displayPrinterStatus, 45000, appendPrintLog);
+    setStatus(tr("Тестовая строка отправлена на печать.", "The test line was sent to print."));
+  } catch (error) {
+    setStatus(tr(`Ошибка тестовой печати: ${error.message}`, `Test print error: ${error.message}`), true);
+  } finally {
+    button.disabled = false;
   }
 });
 
@@ -899,38 +1104,34 @@ async function attemptAutoConnect() {
     const mode = await transport.autoConnect();
     if (!mode) return;
     setConnectionState("arduino");
-    setStatus(tr(`Arduino подключена автоматически через ${mode}.`, `Arduino connected automatically via ${mode}.`));
-    await updatePrinterConnection({ announce: true });
+    setArduinoDetail(true);
+    await updatePrinterConnection();
   } catch (error) {
     setConnectionState("disconnected");
+    setArduinoDetail(false);
     displayPrinterStatus(null);
-    setStatus(tr(`Автоподключение не удалось: ${error.message}`, `Automatic connection failed: ${error.message}`), true);
   }
 }
 
 navigator.serial?.addEventListener("connect", () => setTimeout(attemptAutoConnect, 500));
 window.__androidUsbAttached = () => setTimeout(attemptAutoConnect, 300);
+window.__androidUsbDetached = async () => {
+  if (transport.port) await transport.disconnect().catch(() => {});
+  setConnectionState("disconnected");
+  setArduinoDetail(false);
+  displayPrinterStatus(null);
+};
 navigator.serial?.addEventListener("disconnect", async () => {
   if (transport.port) await transport.disconnect().catch(() => {});
   setConnectionState("disconnected");
+  setArduinoDetail(false);
   displayPrinterStatus(null);
-  setStatus(tr("Кабель Arduino отключён.", "Arduino cable disconnected."), true);
 });
 setTimeout(attemptAutoConnect, 250);
-setInterval(() => {
-  if (transport.port && !printingActive && !printerRecoveryActive) {
-    updatePrinterConnection()
-      .then(async (status) => {
-        if (!status && await recoverPrinterConnection()) {
-          await updatePrinterConnection();
-        }
-      })
-      .catch(() => {});
-  }
-}, 4000);
 
 $("#print").addEventListener("click", async () => {
   if (!hasPhoto) return;
+  setStatus("");
   if (!transport.port) {
     setStatus(tr("Сначала подключите Arduino кнопкой сверху.", "Connect Arduino using the button above first."), true);
     return;
@@ -967,12 +1168,13 @@ $("#print").addEventListener("click", async () => {
     printingActive = false;
     $("#print").disabled = false;
     setTimeout(() => { $("#progress").hidden = true; }, 1200);
-    updatePrinterConnection().catch(() => {});
   }
 });
 
 $("#printCollage").addEventListener("click", async () => {
   if (!collageItems.length) return;
+  $("#collageStatus").textContent = "";
+  resetCollageProgress();
   if (!transport.port) {
     $("#collageStatus").textContent = tr("Сначала подключите Arduino кнопкой сверху.", "Connect Arduino using the button above first.");
     return;
@@ -992,9 +1194,11 @@ $("#printCollage").addEventListener("click", async () => {
         margins: bottomFeed,
       });
       await sendPrintJob(transport, packets, (value) => {
-        const total = (index + value) / collageItems.length;
+        setCollageItemProgress(index, value * .5);
+        const total = (index * 2 + value) / (collageItems.length * 2);
         $("#collageStatus").textContent = tr(`Печать коллажа: ${Math.round(total * 100)}%`, `Printing collage: ${Math.round(total * 100)}%`);
       });
+      setCollageItemProgress(index, .5);
       try {
         await waitForPrinterIdle(transport, displayPrinterStatus);
       } catch (error) {
@@ -1004,18 +1208,17 @@ $("#printCollage").addEventListener("click", async () => {
         }
         setConnectionState("arduino");
         displayPrinterStatus(null);
-        if (index < collageItems.length - 1) {
-          await new Promise((resolve) => setTimeout(resolve, 16000));
-        }
+        await new Promise((resolve) => setTimeout(resolve, 16000));
       }
+      setCollageItemProgress(index, 1);
     }
     $("#collageStatus").textContent = tr("Печать коллажа завершена.", "Collage printing completed.");
+    collagePrintComplete = true;
   } catch (error) {
     $("#collageStatus").textContent = tr(`Ошибка печати: ${error.message}`, `Print error: ${error.message}`);
   } finally {
     printingActive = false;
     $("#printCollage").disabled = false;
-    updatePrinterConnection().catch(() => {});
   }
 });
 
@@ -1062,6 +1265,57 @@ $("#share").addEventListener("click", () => {
       if (error.name !== "AbortError") setStatus(error.message, true);
     }
   }, "image/png");
+});
+
+$("#saveCollage").addEventListener("click", async () => {
+  if (!collageItems.length) return;
+  $("#collageStatus").textContent = "";
+  try {
+    const collageCanvas = await makeCollageCanvas();
+    if (window.AndroidBridge) {
+      const result = window.AndroidBridge.savePng(collageCanvas.toDataURL("image/png"));
+      if (result !== "OK") throw new Error(result);
+      $("#collageStatus").textContent = tr("Коллаж сохранён в галерею.", "Collage saved to gallery.");
+      return;
+    }
+    collageCanvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `android-boy-camera-collage-${Date.now()}.png`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+      $("#collageStatus").textContent = tr("Коллаж сохранён.", "Collage saved.");
+    }, "image/png");
+  } catch (error) {
+    $("#collageStatus").textContent = tr(`Ошибка сохранения: ${error.message}`, `Save error: ${error.message}`);
+  }
+});
+
+$("#shareCollage").addEventListener("click", async () => {
+  if (!collageItems.length) return;
+  $("#collageStatus").textContent = "";
+  try {
+    const collageCanvas = await makeCollageCanvas();
+    if (window.AndroidBridge?.sharePng) {
+      const result = window.AndroidBridge.sharePng(collageCanvas.toDataURL("image/png"));
+      if (result !== "OK") throw new Error(result);
+      return;
+    }
+    const blob = await canvasPngBlob(collageCanvas);
+    const file = new File([blob], `android-boy-camera-collage-${Date.now()}.png`, { type: "image/png" });
+    if (!navigator.share || (navigator.canShare && !navigator.canShare({ files: [file] }))) {
+      throw new Error(tr("Обмен файлами не поддерживается этим браузером.", "File sharing is not supported by this browser."));
+    }
+    await navigator.share({ files: [file], title: "Android Boy Camera Collage" });
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      $("#collageStatus").textContent = tr(`Ошибка отправки: ${error.message}`, `Share error: ${error.message}`);
+    }
+  }
 });
 
 if (!window.isSecureContext) setStatus(tr("Камера и USB требуют HTTPS или localhost.", "Camera and USB require HTTPS or localhost."), true);

@@ -69,6 +69,13 @@ public class MainActivity extends Activity {
                 }
                 String escaped = result.replace("\\", "\\\\").replace("\"", "\\\"");
                 webView.evaluateJavascript("window.__androidUsbResult && window.__androidUsbResult(\"" + escaped + "\")", null);
+            } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(intent.getAction())) {
+                UsbDevice detached = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                if (usbDevice != null && detached != null && detached.getDeviceId() == usbDevice.getDeviceId()) {
+                    disconnectUsb();
+                    webView.evaluateJavascript(
+                            "window.__androidUsbDetached && window.__androidUsbDetached()", null);
+                }
             }
         }
     };
@@ -77,6 +84,7 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         IntentFilter filter = new IntentFilter(USB_PERMISSION);
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(usbReceiver, filter);
 
@@ -170,6 +178,24 @@ public class MainActivity extends Activity {
         else super.onBackPressed();
     }
 
+    @Override protected void onPause() {
+        if (webView != null) {
+            webView.evaluateJavascript(
+                    "window.__androidAppPaused && window.__androidAppPaused()", null);
+            webView.onPause();
+        }
+        super.onPause();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.onResume();
+            webView.evaluateJavascript(
+                    "window.__androidAppResumed && window.__androidAppResumed()", null);
+        }
+    }
+
     @Override protected void onDestroy() {
         disconnectUsb();
         unregisterReceiver(usbReceiver);
@@ -218,6 +244,7 @@ public class MainActivity extends Activity {
         if (usbConnection != null) usbConnection.close();
         usbPort = null;
         usbConnection = null;
+        usbDevice = null;
     }
 
     public class AndroidBridge {
@@ -227,6 +254,14 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface public String restartUsb() {
             return openUsb();
+        }
+
+        @JavascriptInterface public boolean isUsbConnected() {
+            if (usbPort == null || !usbPort.isOpen() || usbDevice == null) return false;
+            for (UsbDevice connected : usbManager.getDeviceList().values()) {
+                if (connected.getDeviceId() == usbDevice.getDeviceId()) return true;
+            }
+            return false;
         }
 
         @JavascriptInterface public String writeUsb(String encoded) {

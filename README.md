@@ -36,7 +36,14 @@ adapter.
 ### Что нужно для печати
 
 Одного APK недостаточно для физической печати. Необходимо собрать переходник на
-Arduino с прошивкой **GameBoyPrinterEmulator** из репозитория
+Arduino. Для более корректной работы с Android Boy Camera рекомендуется прошить
+Arduino специальным скетчем **GameBoyPrinterUsbBridge**, который находится в папке
+[`arduino/GameBoyPrinterUsbBridge`](arduino/GameBoyPrinterUsbBridge) этого проекта.
+В нём режим USB-переходника включён постоянно, поэтому принтер можно включать и
+переподключать без выбора режима при запуске Arduino.
+
+Скетч основан на оригинальном проекте **GameBoyPrinterEmulator**, исходная версия
+которого находится в репозитории
 [mofosyne/arduino-gameboy-printer-emulator](https://github.com/mofosyne/arduino-gameboy-printer-emulator).
 
 Телефон подключается к Arduino через USB OTG. Arduino преобразует полученные от
@@ -54,6 +61,8 @@ Arduino с прошивкой **GameBoyPrinterEmulator** из репозитор
   данных печати.
 - `android/` — Android WebView, разрешения, USB Serial, сохранение и системная
   отправка PNG.
+- `arduino/GameBoyPrinterUsbBridge/` — рекомендуемый скетч постоянно включённого
+  USB-переходника Arduino ↔ Game Boy Printer.
 - `scripts/sync-web.ps1` — собирает веб-интерфейс и переносит результат в
   Android assets.
 
@@ -108,8 +117,15 @@ Android Boy Camera разработан **Duck Wader** при помощи не�
 
 ### Hardware required for printing
 
-The APK alone cannot drive the physical printer. Build an Arduino adapter using
-the **GameBoyPrinterEmulator** firmware from
+The APK alone cannot drive the physical printer. Build an Arduino adapter and,
+for more reliable operation with Android Boy Camera, flash the bundled
+**GameBoyPrinterUsbBridge** sketch from
+[`arduino/GameBoyPrinterUsbBridge`](arduino/GameBoyPrinterUsbBridge).
+It always operates as a USB bridge, so the printer can be powered on or
+reconnected without Arduino selecting a mode at startup.
+
+This sketch is based on the original **GameBoyPrinterEmulator** project. The
+upstream version is available at
 [mofosyne/arduino-gameboy-printer-emulator](https://github.com/mofosyne/arduino-gameboy-printer-emulator).
 
 Connect the phone to the Arduino through USB OTG. The Arduino converts the data
@@ -127,6 +143,8 @@ when needed.
 - `web/` — UI, camera, image processing, collages and print-data generation.
 - `android/` — Android WebView host, permissions, USB Serial, PNG saving and
   native sharing.
+- `arduino/GameBoyPrinterUsbBridge/` — recommended always-on Arduino USB bridge
+  sketch for the Game Boy Printer.
 - `scripts/sync-web.ps1` — builds the web UI and synchronizes it with Android
   assets.
 

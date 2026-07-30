@@ -85,11 +85,15 @@ input[type="range"] { accent-color: #d3dc70; }
 .camera-switch:disabled { opacity: .35; }
 .shutter { width: 64px; height: 64px; border-radius: 50%; border: 2px solid #e6e9d7; background: transparent; padding: 5px; }
 .shutter span { display: block; height: 100%; border-radius: 50%; background: #d4dc69; box-shadow: inset 0 0 0 1px #f4f7ae; }
+.shutter.cancel span { position: relative; background: #3a2a25; box-shadow: inset 0 0 0 1px #9a6257; }
+.shutter.cancel span::before, .shutter.cancel span::after { content: ""; position: absolute; top: 50%; left: 20%; width: 60%; height: 4px; border-radius: 3px; background: #f0b0a0; }
+.shutter.cancel span::before { transform: translateY(-50%) rotate(45deg); }
+.shutter.cancel span::after { transform: translateY(-50%) rotate(-45deg); }
 .shutter:disabled { opacity: .35; }
 .file-button input { position: absolute; opacity: 0; width: 1px; }
 .print-card { margin-top: 13px; border-radius: 12px 12px 20px 20px; padding: 18px; }
 .print-card h2 { margin-top: 4px; font-family: Georgia, serif; font-size: 20px; }
-.print-card > div:first-child, #status, .collage-status { display: none; }
+.print-card > div:first-child { display: none; }
 .print-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 46px; gap: 9px; }
 .collage-commit { grid-column: 1 / -1; background: #d1da68; color: #171a13; }
 .print-button { width: 100%; border: 0; border-radius: 12px; background: #d1da68; color: #171a13; padding: 13px; display: flex; align-items: center; justify-content: center; font-weight: 900; }
@@ -121,6 +125,7 @@ footer a:hover, footer a:focus-visible { text-decoration: underline; }
 .collage-item { position: relative; overflow: hidden; width: 100%; padding: 0; border: 2px solid #4c5543; border-radius: 10px; background: #ddd; user-select: none; }
 .collage-item:active { border-color: #d5df68; }
 .collage-item img { display: block; width: 100%; image-rendering: pixelated; }
+.collage-progress-overlay { position: absolute; z-index: 1; top: 0; left: 0; width: 100%; height: 0; pointer-events: none; background: #75c85a99; mix-blend-mode: multiply; transition: height .25s ease; }
 .collage-item span { position: absolute; top: 6px; left: 6px; display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; color: #171a13; background: #d5df68; font-size: 11px; font-weight: 900; }
 .collage-controls { display: grid; grid-template-rows: repeat(3, 1fr); gap: 5px; }
 .collage-controls button { min-height: 34px; padding: 0; border: 1px solid #515a47; border-radius: 8px; color: #ecefdd; background: #30362a; font-size: 20px; font-weight: 900; }
@@ -128,7 +133,8 @@ footer a:hover, footer a:focus-visible { text-decoration: underline; }
 .collage-controls .delete { color: #f0a090; border-color: #75463e; background: #3a2521; }
 .collage-slot { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 9px; padding: 16px; border: 1px dashed #626b55; border-radius: 12px; background: #151812; }
 .collage-slot button { padding: 13px; border: 1px solid #515a47; border-radius: 9px; color: #ecefdd; background: #30362a; font-weight: 800; }
-.collage-print { margin-top: 12px; }
+.collage-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 46px; gap: 9px; margin-top: 12px; }
+.collage-print { margin-top: 0; }
 .collage-status { min-height: 30px; margin-top: 10px; color: #9fa58f; font-size: 11px; }
 .editor-overlay { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; overflow-y: auto; padding: 18px; background: #080a07cc; }
 .editor-overlay[hidden] { display: none; }
@@ -149,6 +155,16 @@ footer a:hover, footer a:focus-visible { text-decoration: underline; }
 .confirm-card .danger { color: #fff; border-color: #8a4036; background: #8a4036; }
 .about-card p { margin: 10px 0; color: #cbd0bd; line-height: 1.5; }
 .about-card a { color: #d5df68; }
+.status-card p { display: flex; justify-content: space-between; gap: 18px; margin: 12px 0; color: #aeb59f; }
+.status-card b { color: #d9ddcc; text-align: right; }
+.status-card b.ready { color: #b9d867; }
+.status-card b.warning { color: #e1bd57; }
+.status-card b.error, .status-card b.disconnected { color: #e18a78; }
+.print-log-panel { margin-top: 14px; padding: 12px; border: 1px solid #444b3b; border-radius: 12px; background: #11150f; }
+.print-log-panel > div { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #dfe7b0; }
+.print-log-panel button { padding: 6px 10px; }
+#printLog { box-sizing: border-box; width: 100%; height: 220px; margin: 0; padding: 10px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: #b8c39b; background: #080b07; border: 1px solid #30372b; border-radius: 8px; font: 11px/1.45 Consolas, monospace; }
+.status-card b.printing { color: #d5df68; }
 @media (max-width: 380px) {
   .connection b { display: none; }
   .secondary { padding-inline: 9px; }

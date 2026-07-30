@@ -215,7 +215,7 @@ export class PrinterTransport {
       await this.writer.write(bytes);
       return this.readExact(bytes.length, timeout);
     }
-    if (this.port instanceof AndroidUsbSerial) return this.port.exchange(bytes, timeout);
+    if (typeof this.port.exchange === "function") return this.port.exchange(bytes, timeout);
     throw new Error(tr("Чтение ответа пока недоступно для этого подключения", "Response reading is unavailable for this connection"));
   }
 
@@ -237,6 +237,14 @@ export class PrinterTransport {
     }
     const result = window.AndroidBridge.restartUsb();
     if (result !== "READY") return false;
+    return true;
+  }
+
+  async isConnected() {
+    if (!this.port) return false;
+    if (window.AndroidBridge && this.port === window.AndroidBridge && window.AndroidBridge.isUsbConnected) {
+      return Boolean(window.AndroidBridge.isUsbConnected());
+    }
     return true;
   }
 

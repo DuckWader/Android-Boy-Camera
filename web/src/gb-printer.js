@@ -64,14 +64,41 @@ export function makePrintJob(tileBytes, { density = 0x60, margins = 0x03 } = {})
   return packets;
 }
 
-export async function sendPrintJob(transport, packets, onProgress) {
+function commandName(bytes) {
+  if (bytes?.[0] !== 0x88 || bytes?.[1] !== 0x33) return "RAW";
+  if (bytes[2] === 0x01) return "INIT";
+  if (bytes[2] === 0x02) return "PRINT";
+  if (bytes[2] === 0x04) return bytes.length === EMPTY_DATA.length ? "EMPTY DATA" : "DATA";
+  if (bytes[2] === 0x0f) return "INQUIRY";
+  return `COMMAND 0x${bytes[2].toString(16).padStart(2, "0").toUpperCase()}`;
+}
+
+function responseSummary(response) {
+  if (!response?.length) return tr("нет ответа", "no response");
+  const tail = Array.from(response.slice(-10), (byte) => byte.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+  const deviceId = response.length >= 2 ? response[response.length - 2] : null;
+  const status = response.length >= 1 ? response[response.length - 1] : null;
+  if (deviceId === null) return `HEX: ${tail}`;
+  return `ID=0x${deviceId.toString(16).padStart(2, "0").toUpperCase()}, STATUS=0x${status.toString(16).padStart(2, "0").toUpperCase()}, HEX: ${tail}`;
+}
+
+export async function sendPrintJob(transport, packets, onProgress, onLog) {
+  onLog ||= globalThis.__printerLog;
   let sent = 0;
   const total = packets.reduce((n, p) => n + (p.bytes || p).length, 0);
   for (const entry of packets) {
     const bytes = entry.bytes || entry;
-    // Keep image transfer compatible with the original Arduino firmware.
-    // Printer status is queried separately with INQUIRY packets.
-    await transport.write(bytes);
+    const name = commandName(bytes);
+    onLog?.("send", name, `${bytes.length} bytes`);
+    try {
+      const response = transport.exchange
+        ? await transport.exchange(bytes, Math.max(2000, bytes.length * 3))
+        : (await transport.write(bytes), null);
+      onLog?.("response", name, responseSummary(response));
+    } catch (error) {
+      onLog?.("response", name, tr(`нет ответа (${error.message})`, `no response (${error.message})`));
+      throw error;
+    }
     sent += bytes.length;
     onProgress?.(sent / total);
     await new Promise((resolve) => setTimeout(resolve, entry.wait || 40));
@@ -105,17 +132,26 @@ function throwForPrinterError(status) {
   throw error;
 }
 
-export async function pingPrinter(transport, timeout = 1200) {
+export async function pingPrinter(transport, timeout = 1200, onLog) {
+  onLog ||= globalThis.__printerLog;
   if (!transport?.port || !transport.exchange) return null;
   transport.clearInput?.();
-  const response = await transport.exchange(new Uint8Array(INQUIRY), timeout);
+  onLog?.("send", "INQUIRY", `${INQUIRY.length} bytes`);
+  let response;
+  try {
+    response = await transport.exchange(new Uint8Array(INQUIRY), timeout);
+    onLog?.("response", "INQUIRY", responseSummary(response));
+  } catch (error) {
+    onLog?.("response", "INQUIRY", tr(`нет ответа (${error.message})`, `no response (${error.message})`));
+    return null;
+  }
   if (response.length < INQUIRY.length) return null;
   const deviceId = response[response.length - 2];
   if (deviceId !== 0x81) return null;
   return decodePrinterStatus(response[response.length - 1]);
 }
 
-export async function waitForPrinterIdle(transport, onStatus, timeout = 45000) {
+async function waitForPrinterIdleLegacy(transport, onStatus, timeout = 45000) {
   const deadline = Date.now() + timeout;
   let sawBusy = false;
   while (Date.now() < deadline) {
@@ -136,4 +172,75 @@ export async function waitForPrinterIdle(transport, onStatus, timeout = 45000) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error("Принтер не завершил печать за отведённое время");
+}
+
+export async function waitForPrinterIdle(transport, onStatus, timeout = 45000, onLog) {
+  onLog ||= globalThis.__printerLog;
+  const overallDeadline = Date.now() + timeout;
+  let lostResponseDeadline = 0;
+  let sawBusy = false;
+
+  while (Date.now() < overallDeadline) {
+    const pollStarted = Date.now();
+    const status = await pingPrinter(transport, lostResponseDeadline ? 450 : 1200, onLog);
+    if (!status) {
+      if (!lostResponseDeadline) {
+        lostResponseDeadline = Date.now() + 10000;
+        onLog?.("timer", "INQUIRY", tr(
+          "Ответ потерян. Запущен таймер на 10 секунд. Опрос продолжается 2 раза в секунду.",
+          "Response lost. A 10-second timer started. Polling continues twice per second.",
+        ));
+      }
+      const remaining = Math.max(0, lostResponseDeadline - Date.now());
+      onLog?.("timer", "INQUIRY", tr(
+        `Нет ответа. Осталось ${(remaining / 1000).toFixed(1)} с`,
+        `No response. ${(remaining / 1000).toFixed(1)} s remaining`,
+      ));
+      if (remaining <= 0) {
+        onLog?.("timer", "INQUIRY", tr(
+          "Таймер завершён. Переход к следующему блоку.",
+          "Timer expired. Continuing with the next block.",
+        ));
+        return null;
+      }
+      const pollDelay = Math.max(0, 500 - (Date.now() - pollStarted));
+      await new Promise((resolve) => setTimeout(resolve, pollDelay));
+      continue;
+    }
+
+    if (lostResponseDeadline) {
+      onLog?.("timer", "INQUIRY", tr(
+        "Ответ восстановлен. Таймер остановлен.",
+        "Response restored. Timer stopped.",
+      ));
+      lostResponseDeadline = 0;
+    }
+
+    onStatus?.(status);
+    throwForPrinterError(status);
+    const busy = status.busy || status.bufferFull || status.unprocessedData;
+    if (busy) sawBusy = true;
+    else if (sawBusy) return status;
+    else {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const confirmation = await pingPrinter(transport, 1200, onLog);
+      if (confirmation) {
+        onStatus?.(confirmation);
+        throwForPrinterError(confirmation);
+        if (!confirmation.busy && !confirmation.bufferFull && !confirmation.unprocessedData) return confirmation;
+        sawBusy = true;
+      } else if (!lostResponseDeadline) {
+        lostResponseDeadline = Date.now() + 10000;
+        onLog?.("timer", "INQUIRY", tr(
+          "Ответ подтверждения потерян. Запущен таймер на 10 секунд.",
+          "Confirmation response lost. A 10-second timer started.",
+        ));
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, lostResponseDeadline ? 50 : 500));
+  }
+  throw new Error(tr(
+    "Принтер не завершил печать за отведённое время",
+    "The printer did not finish within the allowed time",
+  ));
 }
