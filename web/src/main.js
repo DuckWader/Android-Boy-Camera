@@ -10,7 +10,7 @@ import {
 } from "./gb-printer.js";
 import { PrinterTransport } from "./transport.js";
 
-const APP_VERSION = "1.3.3";
+const APP_VERSION = "1.3.4";
 // Diagnostic print logging is retained for future troubleshooting.
 // Set this flag to true to restore the on-screen protocol log.
 const PRINT_LOG_ENABLED = false;

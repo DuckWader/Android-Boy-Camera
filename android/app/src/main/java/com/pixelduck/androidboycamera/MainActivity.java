@@ -279,18 +279,40 @@ public class MainActivity extends Activity {
             if (usbPort == null || !usbPort.isOpen()) return "ERROR:Arduino не подключена";
             byte[] request = Base64.decode(encoded, Base64.DEFAULT);
             ByteArrayOutputStream response = new ByteArrayOutputStream(request.length);
+            final Exception[] readError = new Exception[1];
             try {
                 try { usbPort.purgeHwBuffers(false, true); } catch (Exception ignored) {}
-                usbPort.write(request, Math.max(5000, timeoutMs));
                 long deadline = System.currentTimeMillis() + Math.max(100, timeoutMs);
-                byte[] chunk = new byte[Math.min(1024, request.length)];
-                while (response.size() < request.length && System.currentTimeMillis() < deadline) {
-                    int remaining = (int) Math.max(1, deadline - System.currentTimeMillis());
-                    int count = usbPort.read(chunk, remaining);
-                    if (count > 0) response.write(chunk, 0, Math.min(count, request.length - response.size()));
+
+                // The Arduino bridge replies while bytes are still being sent.
+                // Reading only after a large write fills its small UART TX buffer
+                // and deadlocks the transfer, so drain responses concurrently.
+                Thread responseReader = new Thread(() -> {
+                    byte[] chunk = new byte[Math.min(1024, request.length)];
+                    try {
+                        while (response.size() < request.length && System.currentTimeMillis() < deadline) {
+                            int remaining = (int) Math.max(1, deadline - System.currentTimeMillis());
+                            int count = usbPort.read(chunk, Math.min(100, remaining));
+                            if (count > 0) {
+                                response.write(chunk, 0, Math.min(count, request.length - response.size()));
+                            }
+                        }
+                    } catch (Exception error) {
+                        readError[0] = error;
+                    }
+                }, "gb-printer-usb-reader");
+
+                responseReader.start();
+                usbPort.write(request, Math.max(5000, timeoutMs));
+                responseReader.join(Math.max(100, deadline - System.currentTimeMillis()));
+                if (responseReader.isAlive()) {
+                    responseReader.interrupt();
+                    responseReader.join(200);
                 }
+                if (readError[0] != null) throw readError[0];
                 if (response.size() != request.length) {
-                    return "ERROR:Принтер не ответил вовремя";
+                    return "ERROR:Принтер не ответил вовремя (получено "
+                            + response.size() + " из " + request.length + " байт)";
                 }
                 return Base64.encodeToString(response.toByteArray(), Base64.NO_WRAP);
             } catch (Exception error) {
